@@ -10,7 +10,7 @@ from app.schemas import (
 )
 
 from app.router.mock_router import analyze
-from app.blockchain.mock_payment import authorize
+from blockchain.payment import authorize
 from app.services.executor import run_local, run_paid
 from app.services.history import save_run
 
