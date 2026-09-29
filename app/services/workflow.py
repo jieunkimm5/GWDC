@@ -9,7 +9,7 @@ from app.schemas import (
     PaymentResult,
 )
 
-from app.router.mock_router import analyze
+from app.router.kiln_router import analyze
 from blockchain.payment import authorize
 from app.services.executor import run_local, run_paid
 from app.services.history import save_run
