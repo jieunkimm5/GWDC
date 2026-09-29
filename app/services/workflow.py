@@ -7,6 +7,7 @@ from app.schemas import (
     CostResult,
     PaymentResponse,
     UsageResult,
+    PaymentResult,
 )
 
 from app.router.mock_router import analyze
@@ -41,13 +42,15 @@ def run_workflow(task: str, budget_usd: str) -> RunResponse:
 
         # C가 가지고 있던 budget과
         # A가 계산한 예상 비용을 B에게 전달
-        payment_result = authorize(
+        raw_payment_result = authorize(
             run_id=run_id,
             decision=router_result.recommended_route,
             provider=router_result.selected_model,
             budget_usd=budget_usd,
             estimated_cost_usd=router_result.estimated_cost_usd,
         )
+
+        payment_result = PaymentResult(**raw_payment_result)
 
         payment_approved = payment_result.approved
         tx_hash = payment_result.tx_hash
