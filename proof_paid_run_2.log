@@ -1,0 +1,27 @@
+{
+  "run_id": "run_9f80f3ba",
+  "status": "SUCCESS",
+  "decision": {
+    "recommended_route": "PAID",
+    "actual_route": "PAID",
+    "selected_model": "claude-haiku-4-5-20251001",
+    "reason": "The task involves well-specified code analysis beyond the local baseline and can be managed by a fast paid model with sufficient reasoning capabilities. 적합한 후보 중 예상 유료 추론 비용이 가장 낮아 선택했습니다.",
+    "fallback_reason": null
+  },
+  "cost": {
+    "budget_usd": "0.050000",
+    "estimated_cost_usd": "0.011272",
+    "actual_cost_usd": "0.004293",
+    "user_charge_usd": "0.004293",
+    "platform_charge_usd": "0.000000"
+  },
+  "payment": {
+    "approved": true,
+    "tx_hash": "0xea69f223d5a7cd8e9ca0d54f7ac9bbb2db92fc9316ee5b7d30c3ea4840f2be6a"
+  },
+  "usage": {
+    "input_tokens": 273,
+    "output_tokens": 804
+  },
+  "result": "# Bug Analysis\n\n## Root Cause\nThe bug is a **state mutation bug** where `deduct_balance()` modifies the global `user_balances` dictionary *before* validating that the receiver exists. If the receiver validation fails, the sender's balance is already deducted, leaving the system in an inconsistent state.\n\n## Execution Flow\n\n```\ntransfer(\"alice\", \"charlie\", 80)\n    ↓\nvalidate_transfer(\"alice\", 80)\n    → get_balance(\"alice\") returns 100\n    → 100 >= 80? YES ✓\n    → returns True\n    ↓\ndeduct_balance(\"alice\", 80)\n    → user_balances[\"alice\"] -= 80\n    → user_balances = {\"alice\": 20, \"bob\": 50}  ← STATE MODIFIED\n    ↓\ncheck if \"charlie\" in user_balances\n    → \"charlie\" NOT found ✗\n    → raise ValueError(\"Receiver does not exist\")\n    ↓\nTransfer FAILS, but alice already lost 80!\n```\n\n**Result:**\n```\nValueError: Receiver does not exist\nuser_balances = {\"alice\": 20, \"bob\": 50}  ← CORRUPTED STATE\n```\n\n## The Problem\n- ✗ Balance deducted before receiver validation\n- ✗ No rollback mechanism if transfer fails\n- ✗ State becomes inconsistent\n\n---\n\n## Correct Fix\n\n**Validate ALL preconditions BEFORE modifying state:**\n\n```python\ndef transfer(sender, receiver, amount):\n    # STEP 1: Validate sender has sufficient balance\n    if not validate_transfer(sender, amount):\n        return \"Insufficient balance\"\n    \n    # STEP 2: Validate receiver exists (BEFORE any state change)\n    if receiver not in user_balances:\n        return \"Receiver does not exist\"  # Return instead of raising\n    \n    # STEP 3: Only modify state after ALL validations pass\n    deduct_balance(sender, amount)\n    add_balance(receiver, amount)\n    \n    return \"Transfer complete\"\n\nresult = transfer(\"alice\", \"charlie\", 80)\nprint(result)                              # \"Receiver does not exist\"\nprint(user_balances)                       # {\"alice\": 100, \"bob\": 50} ✓\n```\n\n## Alternative Fix: Atomic Transaction\n\nFor more complex scenarios, use a transaction pattern:\n\n```python\ndef transfer(sender, receiver, amount):\n    # Validate everything first\n    if not validate_transfer(sender, amount):\n        return \"Insufficient balance\"\n    if receiver not in user_balances:\n        return \"Receiver does not exist\"\n    \n    # Atomic operation (all-or-nothing)\n    try:\n        deduct_balance(sender, amount)\n        add_balance(receiver, amount)\n        return \"Transfer complete\"\n    except Exception as e:\n        # Rollback if needed\n        add_balance(sender, amount)  # Restore original balance\n        return f\"Transfer failed: {str(e)}\"\n```\n\n## Key Takeaways\n1. ✅ **Validate all preconditions before modifying state**\n2. ✅ **Separate validation logic from state mutation**\n3. ✅ **Make operations atomic (all-or-nothing)**\n4. ✅ **Fail fast with validation, not exceptions**"
+}

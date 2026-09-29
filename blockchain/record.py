@@ -100,8 +100,10 @@ def record_decision(
 
     # Transaction이 block에 포함될 때까지 기다림
     receipt = w3.eth.wait_for_transaction_receipt(
-        tx_hash
-    )
+    tx_hash,
+    timeout=300,
+    poll_latency=2,
+)
 
     # ★ 가장 중요한 부분
     # Transaction이 실제 성공했을 때만 성공 처리
