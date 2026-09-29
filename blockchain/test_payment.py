@@ -1,7 +1,9 @@
-from payment import authorize
+from blockchain.payment import authorize
 
 
-print("=== TEST 1: budget sufficient ===")
+print("================================")
+print("TEST 1 - Budget sufficient")
+print("================================")
 
 result1 = authorize(
     run_id="run_001",
@@ -14,7 +16,9 @@ result1 = authorize(
 print(result1)
 
 
-print("\n=== TEST 2: budget insufficient ===")
+print("\n================================")
+print("TEST 2 - Budget insufficient")
+print("================================")
 
 result2 = authorize(
     run_id="run_002",
