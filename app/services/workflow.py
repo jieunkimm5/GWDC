@@ -8,7 +8,7 @@ from app.schemas import (
     UsageResult,
     PaymentResult,
 )
-
+from kiln_router.errors import RoutingError
 from app.router.kiln_adapter import analyze
 from blockchain.payment import authorize, settle_payment
 from app.services.executor import run_local, run_paid
@@ -48,7 +48,55 @@ def run_workflow(task: str, budget_usd: str) -> RunResponse:
     # 2. Ask A for routing decision
     # -----------------------------------------------------
 
-    router_result = analyze(task)
+    try:
+        router_result = analyze(task)
+
+    except RoutingError as exc:
+        fallback_reason = str(exc) or "KILN_ROUTING_FAILED"
+
+        local_execution = run_local(
+            task=task,
+            max_output_tokens=2048,
+        )
+
+        response = RunResponse(
+            run_id=run_id,
+            status="SUCCESS",
+
+            decision=DecisionResult(
+                recommended_route="LOCAL",
+                actual_route="LOCAL",
+                selected_model=FALLBACK_LOCAL_MODEL,
+                reason=(
+                    "Kiln could not select a suitable execution model. "
+                    "The request was executed with the local fallback model."
+                ),
+                fallback_reason=str(exc) or "KILN_ROUTING_FAILED",
+            ),
+
+            cost=CostResult(
+                budget_usd=budget_usd,
+                estimated_cost_usd="0.000000",
+                actual_cost_usd=local_execution["actual_cost_usd"],
+                user_charge_usd="0.000000",
+                platform_charge_usd="0.000000",
+            ),
+
+            payment=PaymentResponse(
+                approved=False,
+                tx_hash=None,
+            ),
+
+            usage=UsageResult(
+                input_tokens=local_execution["input_tokens"],
+                output_tokens=local_execution["output_tokens"],
+            ),
+
+            result=local_execution["result"],
+        )
+
+        save_run(response)
+        return response
 
     recommended_route = router_result.recommended_route
     recommended_model = router_result.selected_model
