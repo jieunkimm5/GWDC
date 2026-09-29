@@ -44,13 +44,15 @@ def authorize(
             provider=provider,
         )
 
-    except Exception:
+    except Exception as e:
+        print("BLOCKCHAIN ERROR:", repr(e))
+
         return {
             "approved": False,
             "amount_usd": estimated_cost_usd,
             "tx_hash": None,
             "reason": "BLOCKCHAIN_FAILED",
-        }
+    }
 
     # 4. Transaction was mined but failed
     if blockchain_result["status"] != 1:
