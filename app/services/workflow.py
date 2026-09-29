@@ -15,6 +15,15 @@ from blockchain.payment import authorize
 from app.services.executor import run_local, run_paid
 from app.services.history import save_run
 
+# 허용된 모델 목록
+ALLOWED_PAID_MODELS = {
+    "paid-model-1",
+}
+
+ALLOWED_LOCAL_MODELS = {
+    "local-model-1",
+}
+
 
 def run_workflow(task: str, budget_usd: str) -> RunResponse:
     # 1. 실행마다 고유한 run_id 생성
@@ -25,6 +34,18 @@ def run_workflow(task: str, budget_usd: str) -> RunResponse:
     router_result = analyze(task)
 
     recommended_route = router_result.recommended_route
+
+    if recommended_route == "PAID":
+        if router_result.selected_model not in ALLOWED_PAID_MODELS:
+            raise ValueError(
+                f"Unauthorized paid model: {router_result.selected_model}"
+        )
+
+    elif recommended_route == "LOCAL":
+        if router_result.selected_model not in ALLOWED_LOCAL_MODELS:
+            raise ValueError(
+                f"Unauthorized local model: {router_result.selected_model}"
+        )
 
     payment_approved = False
     tx_hash = None
