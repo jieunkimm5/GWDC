@@ -9,14 +9,14 @@ from app.schemas import (
     PaymentResult,
 )
 
-from app.router.kiln_router import analyze
-from blockchain.payment import authorize
+from app.router.kiln_adapter import analyze
+from blockchain.payment import authorize, settle_payment
 from app.services.executor import run_local, run_paid
 from app.services.history import save_run
 
 
 # =========================================================
-# 허용된 실제 실행 모델
+# Allowed execution models
 # =========================================================
 
 ALLOWED_PAID_MODELS = {
@@ -39,16 +39,13 @@ FALLBACK_LOCAL_MODEL = "qwen3:8b"
 def run_workflow(task: str, budget_usd: str) -> RunResponse:
 
     # -----------------------------------------------------
-    # 1. 실행 ID 생성
+    # 1. Generate unique run ID
     # -----------------------------------------------------
 
     run_id = f"run_{uuid.uuid4().hex[:8]}"
 
     # -----------------------------------------------------
-    # 2. A에게 task 전달
-    #
-    # A는 예산을 보지 않고
-    # task에 적절한 모델과 예상 비용만 결정한다.
+    # 2. Ask A for routing decision
     # -----------------------------------------------------
 
     router_result = analyze(task)
@@ -59,7 +56,7 @@ def run_workflow(task: str, budget_usd: str) -> RunResponse:
     max_output_tokens = router_result.max_output_tokens
 
     # -----------------------------------------------------
-    # 3. 보안: A가 반환한 모델 검증
+    # 3. Security: model allowlist
     # -----------------------------------------------------
 
     if recommended_route == "PAID":
@@ -82,69 +79,77 @@ def run_workflow(task: str, budget_usd: str) -> RunResponse:
         )
 
     # -----------------------------------------------------
-    # 기본 payment 상태
+    # Default values
     # -----------------------------------------------------
 
     payment_approved = False
     tx_hash = None
     fallback_reason = None
 
+    user_charge_usd = "0.000000"
+    platform_charge_usd = "0.000000"
+
 
     # =====================================================
     # CASE 1
-    # A가 처음부터 LOCAL을 추천
+    # A recommends LOCAL
     # =====================================================
 
     if recommended_route == "LOCAL":
 
-        execution = run_local(task, max_output_tokens=max_output_tokens,)
+        execution = run_local(
+            task=task,
+            max_output_tokens=max_output_tokens,
+        )
 
         actual_route = "LOCAL"
         final_selected_model = recommended_model
 
+        # Local execution costs the user/platform $0
+        user_charge_usd = "0.000000"
+        platform_charge_usd = "0.000000"
+
 
     # =====================================================
     # CASE 2
-    # A가 PAID 모델을 추천
+    # A recommends PAID
     # =====================================================
 
     else:
 
         # -------------------------------------------------
-        # 4. B에게 예산 검증 + blockchain 승인 요청
+        # 4. Pre-execution authorization
+        #
+        # estimated_cost <= user budget ?
         # -------------------------------------------------
 
         raw_payment_result = authorize(
             run_id=run_id,
-            decision=router_result.recommended_route,
+            decision=recommended_route,
             provider=recommended_model,
             budget_usd=budget_usd,
             estimated_cost_usd=estimated_cost_usd,
         )
 
-        # B가 추가로 reason을 반환하므로 따로 보관
-        payment_reason = raw_payment_result.get("reason")
-
-        # 우리가 정한 PaymentResult 형식만 추출
-        payment_result = PaymentResult(
-            approved=raw_payment_result["approved"],
-            amount_usd=raw_payment_result["amount_usd"],
-            tx_hash=raw_payment_result.get("tx_hash"),
-        )
+        payment_result = PaymentResult(**raw_payment_result)
 
         payment_approved = payment_result.approved
         tx_hash = payment_result.tx_hash
+        payment_reason = payment_result.reason
 
 
         # =================================================
         # CASE 2-A
-        # 예산 충분 + blockchain 성공
-        # → 추천된 PAID 모델 실제 실행
+        # Budget sufficient + blockchain authorization OK
         # =================================================
 
         if payment_result.approved:
 
             try:
+                # -----------------------------------------
+                # 5. Execute the paid model
+                # -----------------------------------------
+
                 execution = run_paid(
                     task=task,
                     model=recommended_model,
@@ -154,18 +159,48 @@ def run_workflow(task: str, budget_usd: str) -> RunResponse:
                 actual_route = "PAID"
                 final_selected_model = recommended_model
 
-            # ---------------------------------------------
-            # PAID API 자체가 실패한 경우
-            # LOCAL fallback
-            # ---------------------------------------------
 
-            except Exception as e:
+                # -----------------------------------------
+                # 6. Post-execution settlement
+                #
+                # User never pays more than estimated cost.
+                # Excess actual cost is paid by platform.
+                # -----------------------------------------
 
-                local_execution = run_local(task, max_output_tokens=max_output_tokens,)
+                settlement = settle_payment(
+                    estimated_cost_usd=estimated_cost_usd,
+                    actual_cost_usd=execution["actual_cost_usd"],
+                )
+
+                user_charge_usd = settlement[
+                    "user_charge_usd"
+                ]
+
+                platform_charge_usd = settlement[
+                    "platform_charge_usd"
+                ]
+
+
+            # =============================================
+            # Paid API failed after authorization
+            # -> LOCAL fallback
+            # =============================================
+
+            except Exception:
+
+                local_execution = run_local(
+                    task=task,
+                    max_output_tokens=max_output_tokens,
+                )
 
                 actual_route = "LOCAL"
                 final_selected_model = FALLBACK_LOCAL_MODEL
                 fallback_reason = "PAID_API_FAILED"
+
+                # 실제 paid-model 비용을 확정할 수 없으므로
+                # 현재 응답에서는 사용자/플랫폼 charge를 0으로 둔다.
+                user_charge_usd = "0.000000"
+                platform_charge_usd = "0.000000"
 
                 execution = {
                     "result": (
@@ -191,7 +226,7 @@ def run_workflow(task: str, budget_usd: str) -> RunResponse:
 
         # =================================================
         # CASE 2-B
-        # B가 거부
+        # Authorization rejected
         # =================================================
 
         else:
@@ -199,10 +234,18 @@ def run_workflow(task: str, budget_usd: str) -> RunResponse:
             actual_route = "LOCAL"
             final_selected_model = FALLBACK_LOCAL_MODEL
 
-            local_execution = run_local(task, max_output_tokens=max_output_tokens,)
+            local_execution = run_local(
+                task=task,
+                max_output_tokens=max_output_tokens,
+            )
+
+            # No paid model was executed
+            user_charge_usd = "0.000000"
+            platform_charge_usd = "0.000000"
+
 
             # ---------------------------------------------
-            # 예산 부족
+            # Insufficient budget
             # ---------------------------------------------
 
             if payment_reason == "BUDGET_EXCEEDED":
@@ -222,8 +265,9 @@ def run_workflow(task: str, budget_usd: str) -> RunResponse:
                     f"{local_execution['result']}"
                 )
 
+
             # ---------------------------------------------
-            # Blockchain 실패
+            # Blockchain authorization failed
             # ---------------------------------------------
 
             elif payment_reason == "BLOCKCHAIN_FAILED":
@@ -241,8 +285,9 @@ def run_workflow(task: str, budget_usd: str) -> RunResponse:
                     f"{local_execution['result']}"
                 )
 
+
             # ---------------------------------------------
-            # 알 수 없는 승인 실패
+            # Unknown rejection
             # ---------------------------------------------
 
             else:
@@ -277,7 +322,7 @@ def run_workflow(task: str, budget_usd: str) -> RunResponse:
 
 
     # =====================================================
-    # 5. 최종 API 응답
+    # 7. Build final response
     # =====================================================
 
     response = RunResponse(
@@ -296,6 +341,8 @@ def run_workflow(task: str, budget_usd: str) -> RunResponse:
             budget_usd=budget_usd,
             estimated_cost_usd=estimated_cost_usd,
             actual_cost_usd=execution["actual_cost_usd"],
+            user_charge_usd=user_charge_usd,
+            platform_charge_usd=platform_charge_usd,
         ),
 
         payment=PaymentResponse(

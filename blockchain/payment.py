@@ -1,5 +1,6 @@
 from .policy import check_budget
 from .record import record_decision
+from .settlement import settle_cost
 
 
 def authorize(
@@ -12,9 +13,9 @@ def authorize(
     """
     Paid inference authorization.
 
-    1. Check user budget.
-    2. Reject if budget is insufficient.
-    3. If budget is sufficient, record the decision on-chain.
+    1. Check whether the estimated cost fits within the user's budget.
+    2. Reject if the budget is insufficient.
+    3. If sufficient, record authorization on-chain.
     4. Approve only when the blockchain transaction succeeds.
     """
 
@@ -33,7 +34,7 @@ def authorize(
             "reason": "BUDGET_EXCEEDED",
         }
 
-    # 3. Attempt blockchain transaction
+    # 3. Record authorization on blockchain
     try:
         blockchain_result = record_decision(
             run_id=run_id,
@@ -43,16 +44,17 @@ def authorize(
             provider=provider,
         )
 
-    # 4. Blockchain error -> reject paid execution
-    except Exception:
+    except Exception as e:
+        print("BLOCKCHAIN ERROR:", repr(e))
+
         return {
             "approved": False,
             "amount_usd": estimated_cost_usd,
             "tx_hash": None,
             "reason": "BLOCKCHAIN_FAILED",
-        }
+    }
 
-    # 5. Transaction was mined but failed
+    # 4. Transaction was mined but failed
     if blockchain_result["status"] != 1:
         return {
             "approved": False,
@@ -61,9 +63,26 @@ def authorize(
             "reason": "BLOCKCHAIN_FAILED",
         }
 
-    # 6. Budget passed + blockchain transaction succeeded
+    # 5. Authorization succeeded
     return {
         "approved": True,
         "amount_usd": estimated_cost_usd,
         "tx_hash": blockchain_result["tx_hash"],
     }
+
+
+def settle_payment(
+    estimated_cost_usd: str,
+    actual_cost_usd: str,
+) -> dict:
+    """
+    Settle the actual cost after paid-model execution.
+
+    The user never pays more than the estimated cost.
+    Any amount above the estimated cost is covered by the platform.
+    """
+
+    return settle_cost(
+        estimated_cost_usd=estimated_cost_usd,
+        actual_cost_usd=actual_cost_usd,
+    )

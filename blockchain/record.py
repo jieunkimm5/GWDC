@@ -78,7 +78,10 @@ def record_decision(
     ).build_transaction(
         {
             "from": account.address,
-            "nonce": w3.eth.get_transaction_count(account.address),
+            "nonce": w3.eth.get_transaction_count(
+                account.address,
+                "pending",
+                ),
             "chainId": w3.eth.chain_id,
             "gasPrice": w3.eth.gas_price,
         }
