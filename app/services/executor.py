@@ -12,7 +12,7 @@ load_dotenv()
 # Execution configuration
 # =========================================================
 
-LOCAL_MODEL = "qwen3:8b"
+LOCAL_MODEL = "qwen3-fixed"
 
 OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
