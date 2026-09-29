@@ -1,5 +1,21 @@
 .venv/
+<<<<<<< HEAD
 .env
 __pycache__/
 *.pyc
 .pytest_cache/
+=======
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+logs/
+
+# Local experiment input for kiln_router.classify
+task.txt
+>>>>>>> origin/feature/kiln-router
