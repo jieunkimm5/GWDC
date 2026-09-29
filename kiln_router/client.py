@@ -92,6 +92,8 @@ class KilnClient:
                 {"role": "user", "content": task},
             ],
             "max_tokens": self.settings.max_tokens,
+            # Minimize sampling variance so the same task gets the same routing.
+            "temperature": 0,
             "chat_template_kwargs": {"enable_thinking": False},
             "stream": False,
         }

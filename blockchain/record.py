@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -50,7 +51,30 @@ contract = w3.eth.contract(
 )
 
 
+# 같은 지갑으로 동시에 보내면 같은 nonce를 받아 서로 거절된다.
+# 이 서버 프로세스 안에서는 트랜잭션을 한 번에 하나씩 보낸다.
+# (다른 컴퓨터에서 같은 지갑을 동시에 쓰는 경우는 막지 못한다.)
+_TX_LOCK = threading.Lock()
+
+
 def record_decision(
+    run_id: str,
+    decision: str,
+    approved: bool,
+    amount: str,
+    provider: str,
+) -> dict:
+    with _TX_LOCK:
+        return _record_decision_unlocked(
+            run_id=run_id,
+            decision=decision,
+            approved=approved,
+            amount=amount,
+            provider=provider,
+        )
+
+
+def _record_decision_unlocked(
     run_id: str,
     decision: str,
     approved: bool,

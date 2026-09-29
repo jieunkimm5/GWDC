@@ -32,6 +32,24 @@ ALLOWED_LOCAL_MODELS = {
 FALLBACK_LOCAL_MODEL = "qwen3:8b"
 
 
+def _run_local_safely(task: str, max_output_tokens: int) -> tuple[dict, bool]:
+    """
+    로컬 모델 실행이 실패해도 예외(500) 대신 실패 이유를 담은 결과를 돌려준다.
+    두 번째 값은 실행 성공 여부.
+    """
+
+    try:
+        return run_local(task=task, max_output_tokens=max_output_tokens), True
+
+    except Exception as exc:
+        return {
+            "result": f"Local model execution failed: {exc}",
+            "actual_cost_usd": "0.000000",
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }, False
+
+
 # =========================================================
 # Main Workflow
 # =========================================================
@@ -54,14 +72,14 @@ def run_workflow(task: str, budget_usd: str) -> RunResponse:
     except RoutingError as exc:
         fallback_reason = str(exc) or "KILN_ROUTING_FAILED"
 
-        local_execution = run_local(
+        local_execution, local_ok = _run_local_safely(
             task=task,
             max_output_tokens=2048,
         )
 
         response = RunResponse(
             run_id=run_id,
-            status="SUCCESS",
+            status="SUCCESS" if local_ok else "FAILED",
 
             decision=DecisionResult(
                 recommended_route="LOCAL",
@@ -133,6 +151,7 @@ def run_workflow(task: str, budget_usd: str) -> RunResponse:
     payment_approved = False
     tx_hash = None
     fallback_reason = None
+    status = "SUCCESS"
 
     user_charge_usd = "0.000000"
     platform_charge_usd = "0.000000"
@@ -145,10 +164,14 @@ def run_workflow(task: str, budget_usd: str) -> RunResponse:
 
     if recommended_route == "LOCAL":
 
-        execution = run_local(
+        execution, local_ok = _run_local_safely(
             task=task,
             max_output_tokens=max_output_tokens,
         )
+
+        if not local_ok:
+            status = "FAILED"
+            fallback_reason = "LOCAL_EXECUTION_FAILED"
 
         actual_route = "LOCAL"
         final_selected_model = recommended_model
@@ -236,10 +259,13 @@ def run_workflow(task: str, budget_usd: str) -> RunResponse:
 
             except Exception:
 
-                local_execution = run_local(
+                local_execution, local_ok = _run_local_safely(
                     task=task,
                     max_output_tokens=max_output_tokens,
                 )
+
+                if not local_ok:
+                    status = "FAILED"
 
                 actual_route = "LOCAL"
                 final_selected_model = FALLBACK_LOCAL_MODEL
@@ -282,10 +308,13 @@ def run_workflow(task: str, budget_usd: str) -> RunResponse:
             actual_route = "LOCAL"
             final_selected_model = FALLBACK_LOCAL_MODEL
 
-            local_execution = run_local(
+            local_execution, local_ok = _run_local_safely(
                 task=task,
                 max_output_tokens=max_output_tokens,
             )
+
+            if not local_ok:
+                status = "FAILED"
 
             # No paid model was executed
             user_charge_usd = "0.000000"
@@ -375,7 +404,7 @@ def run_workflow(task: str, budget_usd: str) -> RunResponse:
 
     response = RunResponse(
         run_id=run_id,
-        status="SUCCESS",
+        status=status,
 
         decision=DecisionResult(
             recommended_route=recommended_route,

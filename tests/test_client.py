@@ -33,6 +33,7 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(payload["model"], "qwen3-32b")
             self.assertNotIn("reasoning_effort", payload)
             self.assertEqual(payload["chat_template_kwargs"], {"enable_thinking": False})
+            self.assertEqual(payload["temperature"], 0)
             self.assertEqual(payload["messages"][1]["content"], "Hello")
             self.assertNotIn("response_format", payload)
             return httpx.Response(200, json=body(), headers={"X-Neocloud-Generation-Id": "gen-test"})

@@ -73,6 +73,19 @@ if "budget" not in st.session_state:
 if "result_data" not in st.session_state:
     st.session_state.result_data = None
 
+# 실행 중에는 버튼을 막는다. 다시 누르면 이전 요청은 서버에서 계속 돌고
+# 화면은 새 요청을 보내므로, 요청이 쌓여 결과가 끝내 표시되지 않는다.
+if "running" not in st.session_state:
+    st.session_state.running = False
+
+if "run_error" not in st.session_state:
+    st.session_state.run_error = None
+
+
+def start_run():
+    st.session_state.running = True
+    st.session_state.run_error = None
+
 
 # =========================================================
 # CSS
@@ -814,10 +827,16 @@ with st.container(border=True):
         <div style="height:31px;"></div>
         """)
 
-        run_button = st.button(
-            "▶  Run Agent",
+        st.button(
+            (
+                "⏳  실행 중... (최대 몇 분)"
+                if st.session_state.running
+                else "▶  Run Agent"
+            ),
             type="primary",
             use_container_width=True,
+            disabled=st.session_state.running,
+            on_click=start_run,
         )
 
     
@@ -826,13 +845,12 @@ with st.container(border=True):
 # API
 # =========================================================
 
-if run_button:
-
-    if not task.strip():
-        st.error("Task를 입력해주세요.")
-        st.stop()
+if st.session_state.running:
 
     try:
+
+        if not task.strip():
+            raise ValueError("Task를 입력해주세요.")
 
         with st.spinner(
             "AI가 작업을 분석하고 있습니다..."
@@ -844,7 +862,7 @@ if run_button:
                     "task": task,
                     "budget_usd": budget,
                 },
-                timeout=180.0,
+                timeout=900.0,
             )
 
             response.raise_for_status()
@@ -855,23 +873,36 @@ if run_button:
 
     except httpx.ConnectError:
 
-        st.error(
+        st.session_state.run_error = (
             "FastAPI 서버에 연결할 수 없습니다. "
             "uvicorn 실행 여부를 확인해주세요."
         )
 
     except httpx.HTTPStatusError as exc:
 
-        st.error(
+        st.session_state.run_error = (
             f"Backend error: "
             f"{exc.response.status_code}"
         )
 
+    except ValueError as exc:
+
+        st.session_state.run_error = str(exc)
+
     except Exception as exc:
 
-        st.error(
+        st.session_state.run_error = (
             f"Request failed: {exc}"
         )
+
+    finally:
+        st.session_state.running = False
+
+    # 버튼을 다시 활성화하고 결과를 그린다.
+    st.rerun()
+
+if st.session_state.run_error:
+    st.error(st.session_state.run_error)
 
 
 # =========================================================

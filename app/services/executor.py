@@ -4,6 +4,8 @@ from decimal import Decimal
 import httpx
 from dotenv import load_dotenv
 
+from kiln_router.models import MODELS
+
 
 load_dotenv()
 
@@ -41,9 +43,16 @@ MODEL_PRICING = {
     },
 }
 
-# 해커톤 데모용 실제 실행 제한
-# A의 execution_max_output_tokens와 나중에 동일하게 맞추면 됨
+# 실제 실행 제한: A가 비용을 계산할 때 쓴 값과 같아야 한다.
+# qwen3-fixed는 qwen3:8b에 파라미터만 고정한 Ollama 모델(Modelfile)이므로
+# 한도는 A에 등록된 qwen3:8b 설정을 따른다.
+A_LOCAL_MODEL_ID = "qwen3:8b"
+LOCAL_MAX_OUTPUT_TOKENS = MODELS[A_LOCAL_MODEL_ID].execution_max_output_tokens
+LOCAL_CONTEXT_TOKENS = MODELS[A_LOCAL_MODEL_ID].execution_context_tokens
 
+# qwen3:8b는 노트북에서 초당 약 17토큰이라 2,048토큰에 약 2분이 걸린다.
+LOCAL_TIMEOUT_SECONDS = 300.0
+PAID_TIMEOUT_SECONDS = 300.0
 
 
 # =========================================================
@@ -89,6 +98,10 @@ def calculate_cost(
 # =========================================================
 
 def run_local(task: str, max_output_tokens: int) -> dict:
+    # PAID 추천 후 대체 실행이면 유료 모델용 한도(예: 4096)가 들어올 수 있다.
+    # 로컬 모델의 실행 한도를 넘기지 않는다.
+    max_output_tokens = min(max_output_tokens, LOCAL_MAX_OUTPUT_TOKENS)
+
     payload = {
         "model": LOCAL_MODEL,
         "messages": [
@@ -101,6 +114,7 @@ def run_local(task: str, max_output_tokens: int) -> dict:
         "think": False,
         "options": {
             "num_predict": max_output_tokens,
+            "num_ctx": LOCAL_CONTEXT_TOKENS,
         },
     }
 
@@ -109,7 +123,7 @@ def run_local(task: str, max_output_tokens: int) -> dict:
         response = httpx.post(
             OLLAMA_URL,
             json=payload,
-            timeout=120.0,
+            timeout=LOCAL_TIMEOUT_SECONDS,
         )
 
         response.raise_for_status()
@@ -195,7 +209,7 @@ def run_paid(task: str, model: str, max_output_tokens: int) -> dict:
             ANTHROPIC_URL,
             headers=headers,
             json=payload,
-            timeout=120.0,
+            timeout=PAID_TIMEOUT_SECONDS,
         )
 
         response.raise_for_status()
