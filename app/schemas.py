@@ -1,6 +1,6 @@
+from decimal import Decimal, InvalidOperation
 from typing import Optional
-
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 # =========================
@@ -10,6 +10,34 @@ class RunRequest(BaseModel):
     task: str
     budget_usd: str
 
+    @field_validator("task")
+    @classmethod
+    def validate_task(cls, value: str) -> str:
+        value = value.strip()
+
+        if not value:
+            raise ValueError("Task cannot be empty.")
+
+        if len(value) > 10000:
+            raise ValueError("Task is too long.")
+
+        return value
+
+    @field_validator("budget_usd")
+    @classmethod
+    def validate_budget(cls, value: str) -> str:
+        try:
+            budget = Decimal(value)
+        except InvalidOperation:
+            raise ValueError("budget_usd must be a valid decimal number.")
+
+        if not budget.is_finite():
+            raise ValueError("budget_usd must be finite.")
+
+        if budget < 0:
+            raise ValueError("budget_usd cannot be negative.")
+
+        return value
 
 # =========================
 # 2. A -> C
@@ -20,7 +48,7 @@ class RouterResult(BaseModel):
     selected_model: str
     reason: str
     estimated_cost_usd: str
-
+    max_output_tokens: int
 
 # =========================
 # 3. B -> C
