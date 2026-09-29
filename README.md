@@ -1,6 +1,6 @@
-# GWDC
+# Agent Finance
 
-사용자 작업을 Kiln으로 분석하고, 적합한 실행 모델과 예상 비용을 추천하는 AI inference purchasing agent 프로젝트입니다.
+Agent Finance is an AI inference purchasing agent that allows users to submit an AI task with a maximum spending budget, uses Kiln to choose between local and paid LLM execution, verifies budget constraints before paid inference, and records payment authorization on the blockchain.
 
 ## A 모듈 개발 환경
 
